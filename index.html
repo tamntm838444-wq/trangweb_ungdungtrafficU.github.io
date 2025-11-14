@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TrafficU  — Real-time Traffic Map</title>
+
+  <!-- Leaflet + MarkerCluster + Heatmap -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
+  <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root{
+      --bg: #f4f7fb;
+      --panel: #fff;
+      --muted: #6b7280;
+      --accent: #06b6d4;
+      --accent-2: #0ea5a4;
+      --danger: #ef4444;
+      --good: #10b981;
+      --radius: 12px;
+      --glass: rgba(255,255,255,0.6);
+      --shadow: 0 10px 30px rgba(12,15,30,0.06);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:var(--bg);color:#0f1724;transition:background .35s,color .35s}
+    header{display:flex;align-items:center;gap:14px;padding:14px 18px;background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#fff}
+    .logo{width:56px;height:56px;border-radius:10px;background:rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:center;overflow:hidden}
+    .brand{font-weight:900;font-size:18px}
+    .tag{font-size:12px;opacity:.95}
+    nav{display:flex;gap:10px;padding:10px 18px;align-items:center;background:transparent}
+    nav a{color:inherit;text-decoration:none;font-weight:700}
+    .top-controls{margin-left:auto;display:flex;gap:8px;align-items:center}
+
+    main{display:grid;grid-template-columns:1fr 420px;gap:18px;padding:18px;height:calc(100% - 120px)}
+    .card{background:var(--panel);border-radius:var(--radius);padding:14px;box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:0}
+    /* Map */
+    #map{height:100%;min-height:420px;border-radius:10px;overflow:hidden;box-shadow:0 8px 30px rgba(12,15,30,0.06);transition:box-shadow .25s}
+    #map.glow{box-shadow:0 12px 40px rgba(6,182,212,0.14),0 8px 30px rgba(12,15,30,0.06)}
+
+    /* Summary */
+    .stats {display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+    .stat{background:linear-gradient(180deg,#fff,#fbfdff);padding:10px;border-radius:10px;text-align:center;box-shadow:0 6px 18px rgba(12,15,30,0.04)}
+    .stat .label{font-size:13px;color:var(--muted)}
+    .stat .value{font-weight:900;font-size:20px;margin-top:6px}
+    .stat .sub{font-size:12px;color:#94a3b8;margin-top:6px}
+
+    /* controls */
+    input[type=text],select{width:100%;padding:10px;border-radius:8px;border:1px solid #e6eef0}
+    .form-row{display:flex;gap:8px;margin-top:8px}
+    button{background:linear-gradient(90deg,var(--accent),var(--accent-2));border:0;color:#fff;padding:10px 12px;border-radius:8px;cursor:pointer;font-weight:700;transition:transform .12s, box-shadow .12s}
+    button:hover{transform:translateY(-3px);box-shadow:0 8px 20px rgba(6,182,212,0.12)}
+    .small{padding:8px;font-size:13px}
+
+    /* charts */
+    .charts{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+    .chart-card{padding:10px;border-radius:8px;background:linear-gradient(180deg,#fff,#f7fbff);min-height:140px}
+
+    /* leaderboard */
+    .leaderboard{margin-top:12px;border-radius:10px;padding:8px;background:linear-gradient(180deg,#fff,#fbfcff)}
+    .leaderboard-item{display:flex;justify-content:space-between;padding:6px 4px;border-bottom:1px solid #f1f5f9;font-weight:700}
+
+    /* info row */
+    .meta-row{display:flex;gap:12px;align-items:center;margin-top:12px}
+
+    /* toast */
+    #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:22px;padding:10px 14px;border-radius:8px;background:#111;color:#fff;display:none;z-index:9999}
+
+    /* dark theme */
+    body.dark{background:#08121a;color:#e6eef8}
+    body.dark .card{background:#071426}
+    body.dark header{background:linear-gradient(90deg,#0b9b57,#067b3a)}
+    body.dark .stat{background:linear-gradient(180deg,#07172a,#071a2d)}
+    body.dark .chart-card{background:linear-gradient(180deg,#071426,#0a1a23)}
+    body.dark input[type=text], body.dark select { background:#0b1722; color:#e6eef8; border:1px solid rgba(255,255,255,0.06) }
+
+    /* logo car animation */
+    .car-svg{transform-origin:center;transition:transform .9s ease}
+    .car-move{transform:translateX(8px) rotate(-6deg)}
+
+    /* small responsive */
+    @media (max-width:1000px){ main{grid-template-columns:1fr} #map{min-height:420px} .stats{grid-template-columns:repeat(2,1fr)} }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo" aria-hidden>
+      <!-- Animated car SVG -->
+      <svg id="carLogo" class="car-svg" width="44" height="32" viewBox="0 0 64 40" xmlns="http://www.w3.org/2000/svg">
+        <g fill="none" fill-rule="evenodd">
+          <rect rx="6" x="2" y="10" width="60" height="18" fill="#fff" opacity="0.06"></rect>
+          <path id="carBody" d="M8 22c1.5-4 5-8 9-8h30c4 0 7.5 4 9 8v4H8v-4z" fill="#fff" opacity="0.95"></path>
+          <circle cx="18" cy="30" r="3.5" fill="#0f1724"></circle>
+          <circle cx="46" cy="30" r="3.5" fill="#0f1724"></circle>
+        </g>
+      </svg>
+    </div>
+    <div>
+      <div class="brand">TrafficU </div>
+      <div class="tag">Bản đồ giao thông cộng đồng — Real-time & Tracking</div>
+    </div>
+
+    <div class="top-controls">
+      <button id="themeToggle" class="small">🌓 Giao diện</button>
+      <button id="trackToggle" class="small">🛰 Theo dõi: Tắt</button>
+      <button id="btnClear" class="small">🧹 Xóa dữ liệu</button>
+    </div>
+  </header>
+
+  <nav style="padding:8px 18px;color:var(--muted)">
+    <a href="#home">Trang chủ</a> · <a href="#map">Bản đồ</a> · <a href="#help">Hướng dẫn</a>
+    <div style="flex:1"></div>
+    <span class="muted">Demo · Dữ liệu lưu local</span>
+  </nav>
+
+  <main>
+    <!-- Left column -->
+    <section class="card" style="display:flex;flex-direction:column;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <div>
+          <div style="font-weight:900;font-size:18px">Bản đồ & Dashboard</div>
+          <div class="muted" style="margin-top:6px">Định vị chính xác & cảnh báo khi gần điểm nóng.</div>
+        </div>
+        <div style="text-align:right">
+          <div class="muted">Hotspots: <strong id="hotCount">0</strong></div>
+          <div class="muted" id="lastUpdate">Chưa cập nhật</div>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats" style="margin-top:12px">
+        <div class="stat">
+          <div class="label">📊 Tổng báo cáo hôm nay</div>
+          <div class="value" id="totalToday">0</div>
+          <div class="sub" id="delta10">+0 trong 10 phút</div>
+        </div>
+        <div class="stat">
+          <div class="label">🌐 Điểm cộng đồng</div>
+          <div class="value" id="communityPts">0</div>
+          <div class="sub">Top cộng đồng</div>
+        </div>
+        <div class="stat">
+          <div class="label">🔋 Điểm của bạn</div>
+          <div class="value" id="myPoints">0</div>
+          <div class="sub" id="myLevel">Level 1 • Tân binh</div>
+          <div class="progress" style="margin-top:8px"><i id="myProgress" style="display:block;height:8px;width:20%;background:linear-gradient(90deg,var(--accent),var(--accent-2));border-radius:999px"></i></div>
+        </div>
+      </div>
+
+      <!-- Map -->
+      <div id="map" style="margin-top:12px"></div>
+
+      <div class="meta-row">
+        <div class="muted">📊 Tổng phản hồi: <strong id="totalReports">0</strong></div>
+        <div class="muted">📡 Độ chính xác: <strong id="accuracyLabel">-</strong></div>
+        <div style="flex:1"></div>
+        <div id="forecast" class="muted">⏱️ Dự báo: Chưa có dữ liệu</div>
+      </div>
+
+      <!-- charts -->
+      <div class="charts" style="margin-top:12px">
+        <div class="chart-card">
+          <div style="font-weight:800">📈 Xu hướng 60 phút (Tắc đường)</div>
+          <div style="height:120px;margin-top:8px"><canvas id="line60"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div style="font-weight:800">⏱️ Báo cáo 10 phút</div>
+          <div style="height:120px;margin-top:8px"><canvas id="bar10"></canvas></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right column -->
+    <aside class="card">
+      <div style="font-weight:900">📣 Gửi phản hồi</div>
+      <input id="txtLoc" type="text" placeholder="Mô tả vị trí (ví dụ: Nguyễn Hữu Cảnh)" />
+      <div class="form-row">
+        <select id="selStatus">
+          <option value="Tắc đường">🚧 Tắc đường</option>
+          <option value="Tai nạn">💥 Tai nạn</option>
+          <option value="Lưu thông tốt">✅ Lưu thông tốt</option>
+        </select>
+        <button id="btnReport">Gửi</button>
+      </div>
+
+      <div style="margin-top:10px;display:flex;gap:8px">
+      
+        <button id="btnRoute" class="small">✨ Đề xuất tuyến</button>
+        <button id="btnLocate" class="small">📍 Vị trí của tôi</>
+      
+      </div>
+
+      <div style="margin-top:12px">
+        <div style="font-weight:800">🗣️ Giọng nói (TTS)</div>
+        <select id="voices" style="width:100%;padding:8px;border-radius:8px;border:1px solid #e6eef0"></select>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button id="btnSpeak" class="small">🔊 Đọc dự báo</button>
+          <button id="btnTest" class="small">▶️ Thử giọng</button>
+        </div>
+      </div>
+
+      <div style="margin-top:14px">
+        <div style="font-weight:800">🏆 Leaderboard (hôm nay)</div>
+        <div class="leaderboard" id="leaderboard"></div>
+      </div>
+
+      <div style="margin-top:12px;color:var(--muted)">
+        <div>⚙️ Mẹo: Bật "Định vị  " để cập nhật vị trí của bạn liên tục (pin sẽ dùng nhiều hơn).</div>
+      </div>
+    </aside>
+  </main>
+
+  <div id="toast"></div>
+  <footer style="padding:10px 18px;text-align:center;color:var(--muted)">© 2025 TrafficU — Demo · Dữ liệu lưu local</footer>
+
+  <script>
+  // TrafficU v5 — full single-file app
+  const KEY_R = 'trafficu_v5_reports', KEY_P = 'trafficu_v5_points';
+  let reports = JSON.parse(localStorage.getItem(KEY_R) || '[]');
+  let myPoints = Number(localStorage.getItem(KEY_P) || 0);
+  let myPos = null, myMarker = null, myAccuracyCircle = null;
+  let watchId = null;
+  let autoRead = false;
+  let lastHotspots = [];
+
+  // DOM refs
+  const txtLoc = document.getElementById('txtLoc');
+  const selStatus = document.getElementById('selStatus');
+  const btnReport = document.getElementById('btnReport');
+  const btnLocate = document.getElementById('btnLocate');
+  const btnRoute = document.getElementById('btnRoute');
+  const btnClear = document.getElementById('btnClear');
+  const trackToggle = document.getElementById('trackToggle');
+  const themeToggle = document.getElementById('themeToggle');
+  const toast = document.getElementById('toast');
+  const totalReportsEl = document.getElementById('totalReports');
+  const totalTodayEl = document.getElementById('totalToday');
+  const delta10El = document.getElementById('delta10');
+  const communityPtsEl = document.getElementById('communityPts');
+  const myPointsEl = document.getElementById('myPoints');
+  const myLevelEl = document.getElementById('myLevel');
+  const myProgressEl = document.getElementById('myProgress');
+  const accuracyLabel = document.getElementById('accuracyLabel');
+  const hotCountEl = document.getElementById('hotCount');
+  const lastUpdateEl = document.getElementById('lastUpdate');
+  const forecastEl = document.getElementById('forecast');
+  const voicesSel = document.getElementById('voices');
+  const btnSpeak = document.getElementById('btnSpeak');
+  const btnTest = document.getElementById('btnTest');
+  const leaderboardEl = document.getElementById('leaderboard');
+  const carLogo = document.getElementById('carLogo');
+  const mapEl = document.getElementById('map');
+
+  // Map
+  const map = L.map('map').setView([10.776889, 106.700806], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
+
+  const markerCluster = L.markerClusterGroup({showCoverageOnHover:false});
+  const markersLayer = L.layerGroup();
+  markerCluster.addLayer(markersLayer);
+  map.addLayer(markerCluster);
+
+  const heat = L.heatLayer(reports.map(r=>[r.lat,r.lon, r.status==='Tắc đường'?0.9:0.2]), {radius:30, blur:18}).addTo(map);
+  const hotspotLayer = L.layerGroup().addTo(map);
+
+  // Charts
+  const MINUTES = 60, BUCKETS = 10;
+  let lineData = new Array(MINUTES).fill(0);
+  let barData = new Array(BUCKETS).fill(0);
+  const lineCtx = document.getElementById('line60').getContext('2d');
+  const barCtx = document.getElementById('bar10').getContext('2d');
+  const lineChart = new Chart(lineCtx, {
+    type:'line',
+    data:{labels: genLabels(MINUTES), datasets:[{label:'Tắc đường / phút', data:lineData, borderColor:'#f97316', backgroundColor:'rgba(249,115,22,0.08)', tension:0.3}]},
+    options:{plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true}}, maintainAspectRatio:false}
+  });
+  const barChart = new Chart(barCtx, {
+    type:'bar',
+    data:{labels: genLabels(BUCKETS,true), datasets:[{label:'10 phút', data:barData, backgroundColor:'#0ea5a4'}]},
+    options:{plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true}}, maintainAspectRatio:false}
+  });
+
+  // Utilities
+  function showToast(msg, ms=2400){ toast.innerText = msg; toast.style.display='block'; setTimeout(()=>toast.style.display='none', ms); }
+  function save(){ localStorage.setItem(KEY_R, JSON.stringify(reports)); localStorage.setItem(KEY_P, String(myPoints)); }
+  function now(){ return Date.now(); }
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function genLabels(count, short=false){ const arr=[]; const nowDate=new Date(); for(let i=count-1;i>=0;i--){ const d=new Date(nowDate.getTime()-i*60000); arr.push(`${pad(d.getHours())}:${pad(d.getMinutes())}`); } return arr; }
+  function meters(aLat,aLon,bLat,bLon){ const R=6371000; const toRad=d=>d*Math.PI/180; const dLat=toRad(bLat-aLat), dLon=toRad(bLon-aLon); const A=Math.sin(dLat/2)**2 + Math.cos(toRad(aLat))*Math.cos(toRad(bLat))*Math.sin(dLon/2)**2; return 2*R*Math.atan2(Math.sqrt(A), Math.sqrt(1-A)); }
+
+  // TTS
+  function populateVoices(){ const vs = speechSynthesis.getVoices(); voicesSel.innerHTML=''; vs.sort((a,b)=> (a.lang.includes('vi')&&!b.lang.includes('vi'))?-1: (b.lang.includes('vi')&&!a.lang.includes('vi'))?1: a.name.localeCompare(b.name)); vs.forEach(v=>{ const o=document.createElement('option'); o.value=`${v.name}||${v.lang}`; o.textContent=`${v.name} — ${v.lang}`; voicesSel.appendChild(o)}); if(vs.length===0){ const o=document.createElement('option'); o.textContent='(Không có voice)'; voicesSel.appendChild(o)} }
+  if('speechSynthesis' in window){ speechSynthesis.onvoiceschanged = populateVoices; populateVoices(); } else { voicesSel.innerHTML='<option>Trình duyệt không hỗ trợ TTS</option>'; }
+
+  function speak(t){ if(!('speechSynthesis' in window)) return showToast('🔈 Trình duyệt không hỗ trợ giọng nói'); speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance(t); u.lang='vi-VN'; const sel=voicesSel.value; if(sel && sel.includes('||')){ const [name,lang]=sel.split('||'); const v=speechSynthesis.getVoices().find(x=>x.name===name && x.lang===lang); if(v) u.voice=v } u.rate=1; u.pitch=1; speechSynthesis.speak(u); }
+
+  // Levels
+  function calcLevel(p){ const thresholds=[0,50,150,350,700,1200]; let lvl=thresholds.length; for(let i=thresholds.length-1;i>=0;i--){ if(p>=thresholds[i]){ lvl=i+1; break;} } const cur=thresholds[Math.max(0,lvl-1)]; const next=thresholds[lvl]||cur+500; const pct=Math.min(100, Math.round((p-cur)/(next-cur)*100)); const titles=['Tân binh','Người lái','Lái giỏi','Chuyên gia','Cống hiến','Huyền thoại']; return {level:lvl, pct, title: titles[Math.min(titles.length-1,lvl-1)]}; }
+
+  // Render / Hotspots
+  function renderAll(){
+    markerCluster.clearLayers(); markersLayer.clearLayers();
+    reports.forEach(r=>{
+      const color = r.status==='Tắc đường' ? '#f97316' : r.status==='Tai nạn' ? '#ef4444' : '#10b981';
+      const iconHtml = `<div style="width:20px;height:20px;border-radius:50%;background:${color};border:2px solid #fff"></div>`;
+      const icon = L.divIcon({html:iconHtml, className:'', iconSize:[24,24]});
+      const m = L.marker([r.lat,r.lon], {icon});
+      m.bindPopup(`<b>${r.status}</b><br>${r.text}<br><small>${new Date(r.t).toLocaleString()}</small>`);
+      markersLayer.addLayer(m);
+    });
+    markerCluster.addLayer(markersLayer);
+    heat.setLatLngs(reports.map(r=>[r.lat,r.lon, r.status==='Tắc đường'?0.9:0.2]));
+    totalReportsEl.innerText = reports.length;
+    communityPtsEl.innerText = Math.max(300, reports.length*5 + 200);
+    myPointsEl.innerText = myPoints;
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    const todayCount = reports.filter(r=> r.t >= todayStart.getTime()).length;
+    totalTodayEl.innerText = todayCount;
+    const tenAgo = now() - 10*60*1000;
+    const delta10 = reports.filter(r=> r.t >= tenAgo).length;
+    delta10El.innerText = `+${delta10} trong 10 phút`;
+    const lvl = calcLevel(myPoints);
+    myLevelEl.innerText = `Level ${lvl.level} • ${lvl.title}`;
+    myProgressEl.style.width = lvl.pct + '%';
+    lastUpdateEl.innerText = 'Cập nhật: ' + new Date().toLocaleTimeString();
+  }
+
+  function computeHotspots(){
+    const WINDOW_MIN = 45;
+    const cutoff = now() - WINDOW_MIN*60*1000;
+    const recent = reports.filter(r=> r.t >= cutoff);
+    if(!recent.length) return [];
+    const clusters=[];
+    recent.forEach(pt=>{
+      let found=false;
+      for(const c of clusters){
+        if(meters(c.lat,c.lon,pt.lat,pt.lon) < 350){ c.points.push(pt); c.lat=(c.lat*c.count+pt.lat)/(c.count+1); c.lon=(c.lon*c.count+pt.lon)/(c.count+1); c.count++; found=true; break; }
+      }
+      if(!found) clusters.push({lat:pt.lat, lon:pt.lon, points:[pt], count:1});
+    });
+    clusters.forEach(c=>{
+      let score=0;
+      c.points.forEach(p=>{ const age=(now()-p.t)/60000; const recency=Math.max(0,(WINDOW_MIN-age)/WINDOW_MIN); score += (1+recency*2); });
+      c.score = Math.round(score*10);
+    });
+    clusters.sort((a,b)=>b.score - a.score);
+    return clusters;
+  }
+
+  function renderHotspots(){
+    hotspotLayer.clearLayers();
+    const hotspots = computeHotspots();
+    lastHotspots = hotspots;
+    hotCountEl.innerText = hotspots.length;
+    if(!hotspots.length){ forecastEl.innerText = '⏱️ Dự báo: Không có khu vực nguy cơ trong 45 phút'; return; }
+    const top = hotspots[0];
+    const risk = Math.min(99, Math.round(Math.min(30, top.count)*3 + top.score/3));
+    forecastEl.innerText = `⏱️ Dự báo: ${top.count} báo cáo → Khả năng kẹt ${risk}% tại "${top.points[0].text || 'vị trí gần đây'}"`;
+    hotspots.slice(0,5).forEach((h, idx)=>{
+      const el = document.createElement('div'); el.style.width='18px'; el.style.height='18px'; el.style.borderRadius='50%'; el.style.border='2px solid #fff';
+      el.style.background = idx===0? '#ef4444' : (idx===1? '#fb923c' : '#f97316');
+      const marker = L.marker([h.lat,h.lon], {icon:L.divIcon({className:'', html:el.outerHTML, iconSize:[22,22], iconAnchor:[11,11]})}).addTo(hotspotLayer);
+      marker.bindPopup(`<b>Hotspot #${idx+1}</b><br>${h.count} báo cáo<br>Score: ${h.score}`);
+      if(autoRead && myPos && idx===0){ const d = meters(myPos.lat,myPos.lon,h.lat,h.lon); if(d<1500) speak(`Cảnh báo: ${h.count} báo cáo gần bạn. Khả năng tắc ${risk} phần trăm.`); }
+    });
+  }
+
+  // Leaderboard (mock)
+  function updateLeaderboard(){
+    const sample = [{name:'Bạn', pts: myPoints},{name:'user_21', pts: Math.max(0,myPoints - Math.floor(Math.random()*40)+8)},{name:'user_07', pts: Math.max(0,myPoints - Math.floor(Math.random()*60)+18)},{name:'user_33', pts: Math.floor(Math.random()*80)}];
+    sample.sort((a,b)=>b.pts - a.pts);
+    leaderboardEl.innerHTML=''; sample.slice(0,5).forEach((u,i)=>{ const div=document.createElement('div'); div.className='leaderboard-item'; div.innerHTML=`<span>${i+1}. ${u.name}</span><span style="color:var(--accent)">${u.pts} pts</span>`; leaderboardEl.appendChild(div); });
+  }
+
+  // Time-series helpers
+  function initSeriesFromReports(){
+    const nowMs = now();
+    lineData = new Array(MINUTES).fill(0);
+    barData = new Array(BUCKETS).fill(0);
+    reports.forEach(r=>{
+      if(r.status!=='Tắc đường') return;
+      const diffMin = Math.floor((nowMs - r.t)/60000);
+      if(diffMin < MINUTES){ const idx = Math.max(0, MINUTES - 1 - diffMin); lineData[idx] += 1; }
+      if(diffMin < BUCKETS){ const idx2 = Math.max(0, BUCKETS - 1 - diffMin); barData[idx2] += 1; }
+    });
+    lineChart.data.datasets[0].data = lineData; lineChart.data.labels = genLabels(MINUTES); lineChart.update();
+    barChart.data.datasets[0].data = barData; barChart.data.labels = genLabels(BUCKETS,true); barChart.update();
+  }
+
+  // Submit report (uses current position if available)
+  function submitReportAt(lat, lon, opts={}){
+    const text = opts.text || txtLoc.value.trim() || 'Vị trí không rõ';
+    const status = opts.status || selStatus.value;
+    const item = {lat, lon, text, status, t: now(), id: 'r_'+Math.random().toString(36).slice(2,8)};
+    reports.unshift(item);
+    myPoints += (status==='Lưu thông tốt')?3:10;
+    // bump series if tắc
+    if(status==='Tắc đường'){ lineData[lineData.length-1] = (lineData[lineData.length-1] || 0) + 1; barData[barData.length-1] = (barData[barData.length-1] || 0) + 1; lineChart.update(); barChart.update(); }
+    save(); renderAll(); renderHotspots(); updateLeaderboard();
+    showToast('✅ Đã gửi phản hồi');
+    speak(`Ghi nhận ${status} — ${text}`);
+    carLogo.classList.add('car-move'); setTimeout(()=>carLogo.classList.remove('car-move'),900);
+  }
+
+  // Geolocation: single locate and watch (high accuracy)
+  function locateOnce(){
+    if(!('geolocation' in navigator)) return showToast('Thiết bị không hỗ trợ vị trí');
+    navigator.geolocation.getCurrentPosition(pos=>{
+      setMyPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy);
+      map.setView([pos.coords.latitude, pos.coords.longitude], 16);
+      showToast('📍 Đã xác định vị trí (một lần)');
+      carLogo.classList.add('car-move'); setTimeout(()=>carLogo.classList.remove('car-move'),900);
+    }, err=>{
+      showToast('https://maps.app.goo.gl/nyXheeYskgYKpfkXA');
+    }, {enableHighAccuracy:true, timeout:10000, maximumAge:2000});
+  }
+
+  function startWatch(){
+    if(!('geolocation' in navigator)) return showToast('Thiết bị không hỗ trợ vị trí');
+    if(watchId !== null) return;
+    watchId = navigator.geolocation.watchPosition(pos=>{
+      setMyPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy);
+      // auto pan moderately (keep user centered if zoom > 14)
+      if(map.getZoom() < 16) map.setView([pos.coords.latitude, pos.coords.longitude], 15);
+    }, err=>{
+      console.warn('watchPos err', err);
+    }, {enableHighAccuracy:true, maximumAge:2000, timeout:8000});
+    trackToggle.innerText = '🛰 Theo dõi: Bật';
+    showToast('🛰 Bắt đầu theo dõi vị trí');
+  }
+
+  function stopWatch(){
+    if(watchId!==null){ navigator.geolocation.clearWatch(watchId); watchId=null; trackToggle.innerText='🛰 Theo dõi: Tắt'; showToast('🛰 Dừng theo dõi'); }
+  }
+
+  function setMyPosition(lat, lon, accuracy){
+    myPos = {lat, lon};
+    accuracyLabel.innerText = accuracy ? `±${Math.round(accuracy)}m` : '—';
+    // create/update marker & circle
+    if(myMarker) myMarker.setLatLng([lat, lon]); else myMarker = L.circleMarker([lat, lon], {radius:8, color: '#06b6d4', fillColor:'#0ea5a4', fillOpacity:0.9}).addTo(map);
+    if(myAccuracyCircle) myAccuracyCircle.setLatLng([lat, lon]).setRadius(Math.max(10, accuracy)); else myAccuracyCircle = L.circle([lat, lon], {radius: Math.max(10, accuracy), color:'#06b6d4', weight:1, fillOpacity:0.06}).addTo(map);
+    // when moving near hotspot, optionally speak
+    if(lastHotspots && lastHotspots.length>0){
+      const top = lastHotspots[0];
+      const dist = meters(lat,lon, top.lat, top.lon);
+      if(dist < 1000) speak(`Cảnh báo: bạn đang trong bán kính ${Math.round(dist)} mét của khu vực có ${top.count} báo cáo. Hãy cẩn thận.`);
+    }
+  }
+
+  // Handlers
+  btnReport.addEventListener('click', ()=>{
+    if(myPos) submitReportAt(myPos.lat, myPos.lon); else locateOnce();
+  });
+  btnLocate.addEventListener('click', locateOnce);
+
+  trackToggle.addEventListener('click', ()=>{
+    if(watchId===null) startWatch(); else stopWatch();
+  });
+
+  btnRoute.addEventListener('click', ()=>{
+    const c = map.getCenter();
+    const line = [[c.lat-0.01,c.lng-0.01],[c.lat,c.lng+0.01],[c.lat+0.006,c.lng+0.015]];
+    L.polyline(line,{color:'#10b981',weight:6,opacity:0.95}).addTo(map).bindPopup('Tuyến xanh gợi ý').openPopup();
+    showToast('✨ Đã thêm tuyến gợi ý');
+    speak('Tuyến xanh đã được gợi ý, vui lòng hãy tránh khu vực nóng đang được hiển thị trên bản đồ.');
+  });
+
+  // click map quick report
+  map.on('click', e => submitReportAt(e.latlng.lat, e.latlng.lng, {text: txtLoc.value || 'Vị trí được chọn', status: selStatus.value}));
+
+  // simulate community activity & update loop
+  setInterval(()=>{
+    if(Math.random() < 0.32){
+      const c = map.getCenter();
+      const jLat = (Math.random()-0.5)*0.02, jLng = (Math.random()-0.5)*0.02;
+      const statuses = ['Tắc đường','Tai nạn','Lưu thông tốt'];
+      const s = statuses[Math.floor(Math.random()*statuses.length)];
+      const t = s==='Tắc đường' ? 'Kẹt nhẹ (auto)' : s==='Tai nạn'? 'Tai nạn (auto)': 'Lưu thông tốt (auto)';
+      const r = {lat:c.lat+jLat, lon:c.lng+jLng, text:t, status:s, t: now(), id:'sim_'+Math.random().toString(36).slice(2,8)};
+      reports.unshift(r);
+      if(s==='Lưu thông tốt') myPoints += 2;
+      if(s==='Tắc đường'){ lineData[lineData.length-1] = (lineData[lineData.length-1]||0) +1; barData[barData.length-1] = (barData[barData.length-1]||0)+1; }
+      save();
+    }
+    renderAll(); renderHotspots(); updateLeaderboard();
+  }, 10000);
+
+  // minute shift
+  setInterval(()=>{
+    lineData.shift(); lineData.push(0); barData.shift(); barData.push(0);
+    lineChart.data.labels = genLabels(MINUTES); barChart.data.labels = genLabels(BUCKETS,true);
+    lineChart.update(); barChart.update();
+  }, 60000);
+
+  // auto-read control (toggle TTS on hotspot)
+  // For simplicity re-use trackToggle state to indicate auto-read as well (or add separate control)
+  // But keep autoRead variable that can be toggled elsewhere if needed.
+
+  // TTS controls
+  btnSpeak.addEventListener('click', ()=> {
+    if(lastHotspots && lastHotspots.length>0){
+      const t = lastHotspots[0];
+      speak(`Cảnh báo: ${t.count} báo cáo gần đây tại ${t.points[0].text || 'Phạm Văn Đồng'}. Khả năng tắc cao trong 30 phút tới.`);
+      speak(`Cảnh báo: ${t.count} báo cáo gần đây tại ${t.points[0].text || 'Nguyễn Gia Trí'}. Khả năng tắc cao trong 30 phút tới.`);
+    } else speak('Không có cảnh báo phù hợp hiện tại.');
+  });
+  btnTest.addEventListener('click', ()=> speak('Xin chào, đây là giọng đọc tiếng Việt thử nghiệm của tôi.'));
+
+  // theme auto detect
+  (function initTheme(){
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if(prefersDark) document.body.classList.add('dark');
+  })();
+  themeToggle.addEventListener('click', ()=>{ document.body.classList.toggle('dark'); showToast(document.body.classList.contains('dark')? '🌙 Chế độ tối':'🌤️ Chế độ sáng'); });
+
+  // Clear data
+  btnClear.addEventListener('click', ()=>{ if(confirm('Xóa toàn bộ dữ liệu demo (localStorage)?')){ reports=[]; myPoints=0; save(); renderAll(); renderHotspots(); updateLeaderboard(); showToast('🧹 Đã xóa dữ liệu'); } });
+
+  // init
+  initSeriesFromReports();
+  renderAll(); renderHotspots(); updateLeaderboard();
+
+  // expose for debug
+  window.__TrafficU = {reports, renderAll, renderHotspots, submitReportAt, startWatch, stopWatch};
+
+  // save on unload
+  window.addEventListener('beforeunload', save);
+  </script>
+</body>
+</html>
